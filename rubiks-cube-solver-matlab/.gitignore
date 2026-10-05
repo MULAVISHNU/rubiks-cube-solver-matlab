@@ -1,0 +1,18 @@
+# MATLAB
+*.asv
+*.autosave
+*.mex*
+slprj/
+octave-workspace
+*.mat
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Test photos (keep only the ones in examples/)
+/photos/
+.DS_Store
+Thumbs.db
