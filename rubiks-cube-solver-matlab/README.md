@@ -39,11 +39,11 @@ Start with white on top and green facing you.
 
 | Face | Photo instructions |
 |------|--------------------|
-| U (white)  | From above, green edge at the **bottom** of the photo |
+| W (white)  | From above, green edge at the **bottom** of the photo |
 | R (red)    | Red facing you, white edge at the top |
-| F (green)  | Green facing you, white edge at the top |
-| D (yellow) | From below, green edge at the **top** of the photo |
-| L (orange) | Orange facing you, white edge at the top |
+| G (green)  | Green facing you, white edge at the top |
+| Y (yellow) | From below, green edge at the **top** of the photo |
+| O (orange) | Orange facing you, white edge at the top |
 | B (blue)   | Blue facing you, white edge at the top |
 
 Keep the camera square-on to the face, with even, diffuse lighting.
