@@ -3,8 +3,8 @@ function rubiks_solver()
 %
 % Requirements
 %   - MATLAB R2020b or newer with the Image Processing Toolbox
-%   - Python 3 set up for MATLAB (run  pyenv  to check). The solver package
-%     is installed automatically on first run (internet needed once).
+%   - Python 3 set up for MATLAB (run  pyenv  to check).
+%   - MATLAB Support Package for USB Webcams (if using the live camera option).
 %
 % HOW TO HOLD THE CUBE FOR EACH PHOTO  (standard scheme)
 %   Hold the cube with WHITE on top and GREEN facing you, then:
@@ -27,12 +27,22 @@ faceTitle   = { ...
     'LEFT  (Orange center) - white edge at the top', ...
     'BACK  (Blue center)   - white edge at the top'};
 
+% PERFECT STANDARD COLORS FOR GUI AND 3D ANIMATION
+standardRGB = [0.95 0.95 0.95; % W (White)
+               0.80 0.10 0.10; % R (Red)
+               0.10 0.80 0.10; % G (Green)
+               0.90 0.90 0.10; % Y (Yellow)
+               1.00 0.50 0.10; % O (Orange)
+               0.10 0.10 0.80];% B (Blue)
+
 %% ---------------- 0) check everything BEFORE asking for photos ----------------
 solveFcn = preflight();          
 
-%% ---------------- 1) Input Method (Photos or Manual) ----------------
-imgChoice = questdlg('How do you want to input the cube?', ...
-    'Input Method', 'One photo', 'Six photos', 'Manual entry', 'One photo');
+%% ---------------- 1) Input Method (Camera, Photos, or Manual) ----------------
+imgChoice = customQuestdlg('How do you want to input the cube?', 'Input Method', ...
+    {'Use Camera', 'One photo', 'Six photos', 'Manual entry'}, ...
+    {[0.6 0.3 0.8], [0.3 0.6 0.9], [0.9 0.6 0.2], [0.3 0.8 0.4]}); % Purple, Blue, Orange, Green
+
 if isempty(imgChoice), disp('Cancelled.'); return; end
 
 manualMode = strcmp(imgChoice, 'Manual entry');
@@ -43,15 +53,58 @@ if manualMode
     for f = 1:6
         labels(f,:,:) = f;
     end
-    % RGB values matching W(1) R(2) G(3) Y(4) O(5) B(6)
-    centerRGB = [0.95 0.95 0.95; 0.8 0.1 0.1; 0.1 0.8 0.1; 0.9 0.9 0.1; 1.0 0.5 0.1; 0.1 0.1 0.8];
     disp('Manual entry selected. Please use the GUI to build your scrambled cube.');
     
 else
-    %% ---------------- Image Processing (Only if Photos selected) ----------------
+    %% ---------------- Image / Camera Processing ----------------
     rgbSamples = zeros(6,3,3,3);     
+    capturedImages = cell(1,6);
 
-    if strcmp(imgChoice, 'One photo')
+    if strcmp(imgChoice, 'Use Camera')
+        try
+            cam = webcam;
+        catch ME
+            errordlg(['Could not connect to a webcam. Make sure the "MATLAB Support Package for USB Webcams" is installed and a camera is connected.' newline newline 'Error: ' ME.message], 'Camera Error');
+            return;
+        end
+        
+        % Create Live Camera Capture UI
+        hCam = figure('Name', 'Live Camera Capture', 'NumberTitle', 'off', ...
+                      'Position', [150 150 800 600], 'MenuBar', 'none', 'Color', [0.18 0.18 0.18]);
+        axCam = axes('Parent', hCam, 'Position', [0.05 0.15 0.9 0.75]);
+        btnCap = uicontrol('Parent', hCam, 'Style', 'pushbutton', 'String', 'Capture Face', ...
+                           'Units', 'normalized', 'Position', [0.35 0.03 0.3 0.08], ...
+                           'FontSize', 14, 'FontWeight', 'bold', 'BackgroundColor', [0.2 0.8 0.2]);
+        
+        for f = 1:6
+            set(hCam, 'Name', ['Capture Face: ' faceOrder(f)]);
+            set(btnCap, 'String', ['Capture ' colorLetter(f) ' Face']);
+            set(btnCap, 'UserData', false);
+            set(btnCap, 'Callback', @(s,e) set(s, 'UserData', true));
+            
+            % Initialize the frame image object for fast updating
+            img = snapshot(cam);
+            hImg = imshow(img, 'Parent', axCam);
+            title(axCam, ['Hold ' faceTitle{f} ' to camera and click Capture'], 'FontSize', 14, 'Color', 'w');
+            
+            % Fast update loop
+            while isgraphics(hCam) && ~get(btnCap, 'UserData')
+                img = snapshot(cam);
+                set(hImg, 'CData', img);
+                drawnow limitrate;
+            end
+            
+            if ~isgraphics(hCam)
+                disp('Camera capture cancelled.');
+                clear cam;
+                return;
+            end
+            capturedImages{f} = img;
+        end
+        close(hCam);
+        clear cam;
+        
+    elseif strcmp(imgChoice, 'One photo')
         [fn, fp] = uigetfile({'*.jpg;*.jpeg;*.png;*.bmp;*.tif;*.tiff;*.heic','Images'}, ...
             'Select the SINGLE image containing all 6 faces');
         if isequal(fn,0), disp('Cancelled.'); return; end
@@ -62,6 +115,7 @@ else
         end
     end
 
+    % Process and Crop each of the 6 inputs
     for f = 1:6
         if strcmp(imgChoice, 'Six photos')
             [fn, fp] = uigetfile({'*.jpg;*.jpeg;*.png;*.bmp;*.tif;*.tiff;*.heic','Images'}, ...
@@ -72,8 +126,10 @@ else
             catch ME
                 errordlg(['Could not read that image: ' ME.message],'Image error'); return;
             end
-        else
+        elseif strcmp(imgChoice, 'One photo')
             img = masterImg;
+        elseif strcmp(imgChoice, 'Use Camera')
+            img = capturedImages{f};
         end
         
         if size(img,3) ~= 3
@@ -116,11 +172,11 @@ else
             end
         end
     end
-    centerRGB = zeros(6,3);
-    for f = 1:6, centerRGB(f,:) = squeeze(rgbSamples(f,2,2,:))' / 255; end
-    labList   = rgb2lab(list);
-    labCenter = rgb2lab(centerRGB);
-    w = [0.6 1 1];                                   
+    
+    labList = rgb2lab(list);
+    labCenter = rgb2lab(standardRGB);
+    
+    w = [0.1 1 1]; % Emphasize Hue, ignore lightness/glare                                  
     labels = zeros(6,3,3);                           
     k = 0;
     for f = 1:6
@@ -138,7 +194,7 @@ end % End of Input block
 %% ---------------- 3) confirm colors, validate, solve ----------------
 sol = '';
 while true
-    labels = confirmColors(labels, centerRGB, colorLetter, faceOrder);
+    labels = confirmColors(labels, standardRGB, colorLetter, faceOrder);
     close all;
     if isempty(labels), disp('Cancelled.'); return; end
     
@@ -208,13 +264,17 @@ for i = 1:numel(moves)
     fprintf('%2d. %-3s  %s\n', i, moves{i}, describeMove(moves{i}));
 end
 
-if strcmp(questdlg('Step through the moves one at a time with 3D animation?','Solve','Yes','No','Yes'),'Yes')
-    hGraphic = figure('Name', '3D Move Visualization', 'NumberTitle', 'off', 'Color', [0.3 0.3 0.35], 'Position', [200, 200, 800, 700]);
+% Styled prompt for 3D animation
+animChoice = customQuestdlg('Step through the moves one at a time with 3D animation?', 'Solve', ...
+    {'Yes', 'No'}, {[0.2 0.8 0.4], [0.9 0.3 0.3]}); % Green, Red
+
+if strcmp(animChoice, 'Yes')
+    hGraphic = figure('Name', '3D Move Visualization', 'NumberTitle', 'off', 'Color', [0.15 0.15 0.15], 'Position', [200, 200, 800, 700]);
     
     for i = 1:numel(moves)
         fprintf('\nMove %d/%d:  %s  -> %s\n', i, numel(moves), moves{i}, describeMove(moves{i}));
         
-        [hPatches, hArrow] = showMoveGraphic3D(labels, centerRGB, moves{i}, hGraphic);
+        [hPatches, hArrow] = showMoveGraphic3D(labels, standardRGB, moves{i}, hGraphic);
         
         if i <= numel(moves) 
             input('   Press Enter to animate move and continue...','s');
@@ -223,7 +283,7 @@ if strcmp(questdlg('Step through the moves one at a time with 3D animation?','So
         end
     end
     fprintf('\nCube Solved!\n');
-    showMoveGraphic3D(labels, centerRGB, '', hGraphic);
+    showMoveGraphic3D(labels, standardRGB, '', hGraphic);
 end
 disp('Done - the cube should now be solved.');
 end
@@ -240,10 +300,12 @@ end
 disp('Checking solver setup...');
 solveFcn = findSolver();
 if isempty(solveFcn)
-    choice = questdlg(['No cube solver could be set up automatically.' newline newline ...
+    choice = customQuestdlg(['No cube solver could be set up automatically.' newline newline ...
         'You can still continue: the program will read your cube and show the ' ...
-        '54-letter cube string, which you can paste into any Kociemba-compatible ' ...
-        'solver.'], 'Solver not available','Continue without solver','Cancel','Continue without solver');
+        '54-letter cube string, which you can paste into any solver.'], ...
+        'Solver not available', {'Continue without solver', 'Cancel'}, ...
+        {[0.9 0.6 0.2], [0.9 0.3 0.3]}); % Orange, Red
+        
     if ~strcmp(choice,'Continue without solver')
         error('rubiks_solver:cancelled','Cancelled by user.');
     end
@@ -348,10 +410,47 @@ fprintf(['\nNo solver is installed, so here is your standard URFDLB cube string 
 msgbox(['Standard URFDLB Cube string copied to clipboard:' newline solverStr], 'Cube read');
 end
 
+%% ======================= STYLED DIALOG HELPER =======================
+function choice = customQuestdlg(prompt, titleStr, btnLabels, btnColors)
+    % A sleek custom replacement for questdlg that dynamically fits N buttons
+    hFig = figure('Name', titleStr, 'NumberTitle', 'off', ...
+                  'Position', [400, 400, 550, 150], 'WindowStyle', 'modal', ...
+                  'MenuBar', 'none', 'ToolBar', 'none', 'Color', [0.18 0.18 0.18]);
+    
+    uicontrol('Style', 'text', 'String', prompt, ...
+        'Units', 'normalized', 'Position', [0.05 0.5 0.9 0.4], ...
+        'FontSize', 12, 'ForegroundColor', [1 1 1], 'BackgroundColor', [0.18 0.18 0.18], ...
+        'HorizontalAlignment', 'center');
+    
+    choice = '';
+    numBtns = numel(btnLabels);
+    
+    % Dynamic button width and spacing calculations
+    gap = 0.02;
+    btnWidth = (0.9 - gap*(numBtns-1)) / numBtns;
+    startX = 0.05;
+    
+    for i = 1:numBtns
+        uicontrol('Style', 'pushbutton', 'String', btnLabels{i}, ...
+            'Units', 'normalized', 'Position', [startX + (i-1)*(btnWidth+gap), 0.15, btnWidth, 0.3], ...
+            'FontSize', 11, 'FontWeight', 'bold', 'BackgroundColor', btnColors{i}, ...
+            'ForegroundColor', [0 0 0], 'Callback', @(s,e) setChoice(btnLabels{i}));
+    end
+    
+    set(hFig, 'CloseRequestFcn', @(s,e) setChoice(''));
+    uiwait(hFig);
+    
+    function setChoice(val)
+        choice = val;
+        uiresume(hFig);
+        delete(hFig);
+    end
+end
+
 %% ======================= INTERACTIVE UI HELPERS =======================
-function labels = confirmColors(labels, centerRGB, colorLetter, faceOrder)
+function labels = confirmColors(labels, standardRGB, colorLetter, faceOrder)
     hFig = figure('Name','Interactive Cube Editor', 'NumberTitle','off', ...
-                  'Position',[150 150 850 600], 'WindowStyle','modal', 'MenuBar','none');
+                  'Position',[150 150 850 600], 'WindowStyle','modal', 'MenuBar','none', 'Color', [0.18 0.18 0.18]);
               
     workLabels = labels;
     activeColor = 1; % Default to 'W'
@@ -361,25 +460,26 @@ function labels = confirmColors(labels, centerRGB, colorLetter, faceOrder)
     xlim([-1 13]); ylim([-1 10]);
     
     title('Interactive Editor: Select a color on the left, then click a square to paint it.', ...
-        'FontSize', 14, 'FontWeight', 'bold', 'Units', 'normalized', 'Position', [0.5, 1.05, 0]);
+        'FontSize', 14, 'FontWeight', 'bold', 'Color', 'w', 'Units', 'normalized', 'Position', [0.5, 1.05, 0]);
     
-    text(4, -1, 'UP (W)', 'HorizontalAlignment','center', 'FontWeight','bold');
-    text(7, 2, 'RIGHT (R)', 'HorizontalAlignment','center', 'FontWeight','bold');
-    text(4, 2, 'FRONT (G)', 'HorizontalAlignment','center', 'FontWeight','bold');
-    text(4, 9, 'DOWN (Y)', 'HorizontalAlignment','center', 'FontWeight','bold');
-    text(1, 2, 'LEFT (O)', 'HorizontalAlignment','center', 'FontWeight','bold');
-    text(10, 2, 'BACK (B)', 'HorizontalAlignment','center', 'FontWeight','bold');
+    text(4, -1, 'UP (W)', 'HorizontalAlignment','center', 'FontWeight','bold', 'Color', 'w');
+    text(7, 2, 'RIGHT (R)', 'HorizontalAlignment','center', 'FontWeight','bold', 'Color', 'w');
+    text(4, 2, 'FRONT (G)', 'HorizontalAlignment','center', 'FontWeight','bold', 'Color', 'w');
+    text(4, 9, 'DOWN (Y)', 'HorizontalAlignment','center', 'FontWeight','bold', 'Color', 'w');
+    text(1, 2, 'LEFT (O)', 'HorizontalAlignment','center', 'FontWeight','bold', 'Color', 'w');
+    text(10, 2, 'BACK (B)', 'HorizontalAlignment','center', 'FontWeight','bold', 'Color', 'w');
     
     bg = uibuttongroup('Position',[0.02 0.2 0.15 0.6], 'Title','Color Palette', ...
-                       'SelectionChangedFcn',@colorSelected, 'FontSize', 12, 'FontWeight', 'bold');
+                       'SelectionChangedFcn',@colorSelected, 'FontSize', 12, 'FontWeight', 'bold', ...
+                       'BackgroundColor', [0.18 0.18 0.18], 'ForegroundColor', 'w');
     
     for i = 1:6
         tc = [0 0 0]; 
-        if mean(centerRGB(i,:)) < 0.5, tc = [1 1 1]; end
+        if mean(standardRGB(i,:)) < 0.5, tc = [1 1 1]; end
         
         uicontrol(bg, 'Style','radiobutton', 'String', [' ' colorLetter(i)], ...
             'Units','normalized', 'Position',[0.1, 1 - i*0.16, 0.8, 0.14], ...
-            'BackgroundColor', centerRGB(i,:), 'ForegroundColor', tc, ...
+            'BackgroundColor', standardRGB(i,:), 'ForegroundColor', tc, ...
             'UserData', i, 'FontSize', 14, 'FontWeight', 'bold');
     end
     
@@ -395,14 +495,15 @@ function labels = confirmColors(labels, centerRGB, colorLetter, faceOrder)
                 L = workLabels(f,r,c);
                 
                 % HitTest ON enables clicks on squares, PickableParts ALL ensures they register
-                patchHandles{f,r,c} = patch([x x+1 x+1 x], [y y y+1 y+1], centerRGB(L,:), ...
+                patchHandles{f,r,c} = patch([x x+1 x+1 x], [y y y+1 y+1], standardRGB(L,:), ...
                     'EdgeColor','k', 'LineWidth',1.5, 'HitTest', 'on', 'PickableParts', 'all', ...
                     'ButtonDownFcn', {@faceletClick, f, r, c});
                 
                 % HitTest OFF and PickableParts NONE makes text transparent to mouse clicks
+                tc = [0 0 0]; if mean(standardRGB(L,:)) < 0.5, tc = [1 1 1]; end
                 textHandles{f,r,c} = text(x+0.5, y+0.5, colorLetter(L), ...
                     'HorizontalAlignment','center', 'FontWeight','bold', 'FontSize',14, ...
-                    'Color',[0.5 0.5 0.5], 'HitTest','off', 'PickableParts','none'); 
+                    'Color',tc, 'HitTest','off', 'PickableParts','none'); 
             end
         end
     end
@@ -434,8 +535,9 @@ function labels = confirmColors(labels, centerRGB, colorLetter, faceOrder)
     function faceletClick(~, ~, f, r, c)
         if r == 2 && c == 2, return; end
         workLabels(f,r,c) = activeColor;
-        set(patchHandles{f,r,c}, 'FaceColor', centerRGB(activeColor,:));
-        set(textHandles{f,r,c}, 'String', colorLetter(activeColor));
+        set(patchHandles{f,r,c}, 'FaceColor', standardRGB(activeColor,:));
+        tcNew = [0 0 0]; if mean(standardRGB(activeColor,:)) < 0.5, tcNew = [1 1 1]; end
+        set(textHandles{f,r,c}, 'String', colorLetter(activeColor), 'Color', tcNew);
         drawnow; 
     end
     
@@ -461,7 +563,7 @@ txt = sprintf('Turn the %s face %s.', names(face), amt);
 end
 
 %% ======================= 3D Graphical Helpers =======================
-function [hPatches, hArrow] = showMoveGraphic3D(labels, centerRGB, move, hFig)
+function [hPatches, hArrow] = showMoveGraphic3D(labels, standardRGB, move, hFig)
 figure(hFig); clf; hold on; 
 view(3); axis equal off;
 
@@ -474,7 +576,7 @@ idx = 1;
 for f = 1:6
     for r = 1:3
         for c = 1:3
-            color = centerRGB(labels(f,r,c),:);
+            color = standardRGB(labels(f,r,c),:);
             switch f
                 case 1 % W (Up)
                     X = [e(c) e(c+1) e(c+1) e(c)]; Y = [er(r) er(r) er(r+1) er(r+1)]; Z = [1.5 1.5 1.5 1.5];
@@ -511,7 +613,6 @@ if numel(move) > 1
 end
 
 rArrow = 1.3;
-% SIGNIFICANTLY INCREASED RESOLUTION FOR A SMOOTH ARROW CURVE (100+ points instead of 20)
 if strcmp(moveType, 'cw')
     th = linspace(135, 45, 100) * pi/180;
 elseif strcmp(moveType, 'ccw')
@@ -585,7 +686,6 @@ function animateTurn3D(hPatches, hArrow, move)
         end
     end
 
-    % INCREASED ANIMATION FRAMES FOR A BUTTERY SMOOTH TURN
     frames = 30;
     if strcmp(moveType, '2'), frames = 45; end
     dTheta = (angDir / frames) * (pi / 180);
